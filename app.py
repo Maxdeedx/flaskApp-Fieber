@@ -4,85 +4,28 @@ import datetime  # Für Zeitstempel
 matplotlib.use("Agg")  # Headless-Backend für Matplotlib
 import matplotlib.pyplot as plt
 import os
+from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
 app.secret_key = "geheimes_schluesselwort"
 
-# Datei für die Speicherung der Temperaturen
-DATA_FILE = "temperatures.txt"
+# Datenbankkonfiguration
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///data.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-def save_temperatures(data):
-    """Speichert die Temperaturen und Zeitstempel in einer Datei."""
-    print(f"[save_temperatures] Speichere in Datei: {data}")
-    with open(DATA_FILE, "w") as file:
-        for temp, timestamp in data:
-            file.write(f"{temp},{timestamp}\n")
+db = SQLAlchemy(app)
 
-def load_temperatures():
-    """Lädt die Temperaturen und Zeitstempel aus einer Datei."""
-    data = []
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as file:
-            for line in file:
-                if "," in line:  # Überprüfen, ob die Zeile ein Komma enthält
-                    parts = line.strip().split(",")
-                    try:
-                        temp = float(parts[0])
-                        timestamp = parts[1]
-                        data.append((temp, timestamp))
-                    except (ValueError, IndexError):
-                        print(f"[load_temperatures] Ungültige Zeile übersprungen: {line.strip()}")
-                else:
-                    print(f"[load_temperatures] Ungültige Zeile ohne Komma: {line.strip()}")
-    print(f"[load_temperatures] Geladene Daten aus Datei: {data}")
-    return data
+# Datenbank-Modell
+class Temperature(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    temperature = db.Column(db.Float, nullable=False)
+    timestamp = db.Column(db.String, nullable=False)
 
+def create_chart():
+    """Erstellt ein Fieberkurven-Diagramm aus den aktuellen Daten der Datenbank."""
+    data = [entry.temperature for entry in Temperature.query.all()]
+    timestamps = [entry.timestamp for entry in Temperature.query.all()]
 
-# Temporärer Speicher für die Temperaturen
-temperatures = []
-
-@app.route("/", methods=["GET", "POST"])
-def home():
-    global temperatures
-    temperatures = load_temperatures()  # Datei immer neu laden
-    print(f"[home] Nach Laden der Datei: {temperatures}")
-
-    if request.method == "POST":
-        temp = request.form.get("temperature")
-        print(f"[home] Eingabe erhalten: {temp}")
-        if temp:
-            try:
-                temp = float(temp)
-                if 35 <= temp <= 43:
-                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Zeitstempel erstellen
-                    temperatures.append((temp, timestamp))
-                    save_temperatures(temperatures)
-                    create_chart([t[0] for t in temperatures])  # Nur Temperaturen für das Diagramm
-                    print(f"[home] Nach Hinzufügen: {temperatures}")
-                else:
-                    flash(f"Ungültiger Wert: {temp}°C. Bitte nur Werte zwischen 35 und 43 eingeben.")
-            except ValueError:
-                flash("Ungültige Eingabe. Bitte eine Zahl eingeben.")
-
-    return render_template("index.html", temperatures=temperatures)
-
-from flask import Flask, render_template, request, send_file, flash, redirect, url_for
-# Der Rest deines Imports bleibt gleich
-
-@app.route("/clear", methods=["POST"])
-def clear_data():
-    """Löscht alle gespeicherten Temperaturen."""
-    global temperatures
-    print(f"[clear_data] Vor dem Löschen: {temperatures}")
-    temperatures = []  # Liste zurücksetzen
-    save_temperatures(temperatures)  # Datei leeren
-    print(f"[clear_data] Nach dem Löschen: {temperatures}")
-    flash("Alle gespeicherten Daten wurden gelöscht.")
-    return redirect(url_for("home"))  # Leitet zurück auf die Startseite
-
-
-def create_chart(data):
-    """Erstellt ein Fieberkurven-Diagramm."""
     plt.figure(figsize=(8, 4))
     plt.plot(data, marker="o", color="red", linestyle="-")
     plt.title("Fieberkurve")
@@ -92,6 +35,7 @@ def create_chart(data):
     # Dynamische y-Achse mit Puffer
     if data:
         plt.ylim(min(data) - 1, max(data) + 1)
+        plt.xticks(range(len(timestamps)), timestamps, rotation=45, fontsize=8)  # Zeitstempel als x-Achse
     else:
         plt.ylim(35, 43)
 
@@ -100,8 +44,40 @@ def create_chart(data):
     # Speicher das Diagramm
     chart_path = os.path.join("static", "chart.png")
     os.makedirs("static", exist_ok=True)
+    plt.tight_layout()  # Verhindert Überlappung der Achsentexte
     plt.savefig(chart_path)
     plt.close()
+
+@app.route("/", methods=["GET", "POST"])
+def home():
+    if request.method == "POST":
+        temp = request.form.get("temperature")
+        if temp:
+            try:
+                temp = float(temp)
+                if 35 <= temp <= 43:
+                    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    new_measurement = Temperature(temperature=temp, timestamp=timestamp)
+                    db.session.add(new_measurement)
+                    db.session.commit()
+                    create_chart()  # Aktualisiere das Diagramm
+                    flash("Temperatur erfolgreich hinzugefügt!")
+                else:
+                    flash(f"Ungültiger Wert: {temp}°C. Bitte nur Werte zwischen 35 und 43 eingeben.")
+            except ValueError:
+                flash("Ungültige Eingabe. Bitte eine Zahl eingeben.")
+
+    # Daten aus der Datenbank abrufen
+    measurements = Temperature.query.all()
+    return render_template("index.html", measurements=measurements)
+
+@app.route("/clear", methods=["POST"])
+def clear_data():
+    db.session.query(Temperature).delete()
+    db.session.commit()
+    create_chart()  # Aktualisiere das Diagramm
+    flash("Alle Daten gelöscht!")
+    return redirect("/")
 
 @app.route("/chart")
 def get_chart():
@@ -109,4 +85,7 @@ def get_chart():
     return send_file(os.path.join("static", "chart.png"), mimetype="image/png")
 
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()  # Erstelle die Datenbank, falls sie noch nicht existiert
+        create_chart()  # Initiales Diagramm erstellen
     app.run(debug=True, port=8080)

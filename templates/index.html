@@ -9,32 +9,37 @@
     </div>
     {% endif %}
     {% endwith %}
+
     <form method="POST">
         <label for="temperature">Temperatur eingeben:</label>
         <input type="text" id="temperature" name="temperature" required>
         <button type="submit">Hinzufügen</button>
     </form>
+
     <form method="POST" action="/clear">
-        <button type="submit" style="background-color: red; color: white;">Alle Temperaturen löschen</button>
+        <button type="submit" style="background-color: red; color: white;">Alle Messungen löschen</button>
     </form>
-    <h2>Gespeicherte Temperaturen:</h2>
-    <table>
+
+    <h2>Gespeicherte Messungen:</h2>
+    <table border="1">
         <thead>
             <tr>
+                <th>ID</th>
                 <th>Temperatur (°C)</th>
                 <th>Uhrzeit</th>
             </tr>
         </thead>
         <tbody>
-            {% for temp, timestamp in temperatures %}
+            {% for measurement in measurements %}
             <tr>
-                <td>{{ temp }}</td>
-                <td>{{ timestamp }}</td>
+                <td>{{ measurement.id }}</td>
+                <td>{{ measurement.temperature }}</td>
+                <td>{{ measurement.timestamp }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+
     <h2>Fieberkurve:</h2>
     <img src="/chart" alt="Fieberkurve">
 </body>
-
